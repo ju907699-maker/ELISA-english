@@ -10,4 +10,11 @@
  *   appId: "1:123:web:abc"
  * };
  */
-window.EL_FIREBASE = null;
+window.EL_FIREBASE = {
+  apiKey: "AIzaSyB_Gn4kI6TtCaQL3kpiSgDDqmsnQ-5ChU8",
+  authDomain: "elisa-english-b3d59.firebaseapp.com",
+  projectId: "elisa-english-b3d59",
+  storageBucket: "elisa-english-b3d59.firebasestorage.app",
+  messagingSenderId: "555960979816",
+  appId: "1:555960979816:web:ba020844fa29fd94bfc6dd"
+};
