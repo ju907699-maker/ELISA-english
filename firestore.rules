@@ -1,0 +1,24 @@
+rules_version = '2';
+// 英文傳說 Firestore 安全規則
+// learners/{uid}：學習者只能讀寫自己的紀錄；管理者可讀全部。
+// bank：登入者可讀題庫；只有管理者能新增題目。
+// admins/{uid}：管理者名單，只能在 Firebase 主控台手動新增。
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function isAdmin() { return signedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)); }
+
+    match /learners/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow write: if signedIn() && request.auth.uid == uid;
+    }
+    match /bank/{qid} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+    match /admins/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
+  }
+}
