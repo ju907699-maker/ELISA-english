@@ -647,7 +647,8 @@ function renderMap(){
   $("#stagePick").innerHTML = STAGES.map(s=>`<button aria-pressed="${s.n===curStage}" ${unlocked(s.n)?"":"disabled"} data-st="${s.n}">${s.n}. ${s.name}</button>`).join("");
   $("#skillBtns").innerHTML = Object.entries(SKILLS).map(([k,v])=>{ const sk=P.skills[k]; const acc=sk.a?Math.round(sk.c/sk.a*100)+"%":"—";
     let mline, pct, good=false;
-    if(k==="V"||k==="G"){ const mc=masteredCount(P,k), tot=unitTotal(k); mline=`已精熟 ${mc}/${tot} ${k==="V"?"個主題":"項技能"}`; pct=tot?mc/tot*100:0; }
+    if(k==="V"){ const pr=progressOf(VOCAB.filter(v=>v.stage===curStage).map(v=>({id:v.id}))); mline=pr.n?`第 ${curStage} 區：練過 ${pr.practiced}/${pr.n} 個主題，精熟 ${pr.mastered}`:`第 ${curStage} 區沒有單字主題`; pct=pr.pct; good=pr.n&&pr.mastered===pr.n; }
+    else if(k==="G"){ const pr=progressOf(GRAMMAR.filter(u=>unlocked(u.stage))); mline=`練過 ${pr.practiced} 項，精熟 ${pr.mastered}/${pr.n} 項`; pct=pr.pct; }
     else { const m=mastery(P.gram[k+"-"+curStage]); mline=`第 ${curStage} 區：${m.label}（近 ${m.n} 題對 ${m.ok}）`; pct=m.ok*10; good=m.lv===3; }
     return `<button class="skillbtn" data-sk="${k}">${guardSVG(k,"happy",60)}<b>${v.name}</b><span><i>${GUARD[k].name}</i>｜正確率 ${acc}</span><span>${mline}<span class="prog" style="display:block;margin-top:4px"><i style="width:${pct}%;${good?"background:var(--good)":""}"></i></span></span></button>`; }).join("");
   const due=dueUnits();
@@ -892,6 +893,11 @@ function finishRound(){
 const SR_DAYS=[1,1,2,4,7,14];
 function addDays(n){ const d=new Date(Date.now()+n*864e5); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
 function gUnit(id){ const g=P.gram[id]||(P.gram[id]={a:0,c:0}); if(!g.hist) g.hist=[]; if(g.box==null) g.box=0; return g; }
+// 練習進度：每個單元以「最近 10 題答對數」累積，精熟算滿分；有練習就至少顯示一小段，讓學習者看得到進度
+function progressOf(units){ const n=units.length; if(!n) return {n:0,practiced:0,mastered:0,pct:0};
+  let pts=0, practiced=0, mastered=0;
+  units.forEach(u=>{ const g=P.gram[u.id], m=mastery(g); if(m.lv) practiced++; if(m.lv===3){ mastered++; pts+=10; } else pts+=Math.min(m.ok,10); });
+  const raw=pts/(10*n)*100; return {n,practiced,mastered,pct: practiced? Math.max(raw,3) : 0}; }
 function mastery(g){
   if(!g||!g.a) return {lv:0,label:"未開始",cls:"",n:0,ok:0};
   const h=(g.hist||[]).slice(-10), ok=h.filter(x=>x.o).length, days=new Set(h.map(x=>x.d)).size;
@@ -924,7 +930,7 @@ function renderGrammarHall(){
   $("#game").innerHTML=`<div class="guard-head">${guardSVG("G","happy",64)}<div><div class="eyebrow">文法館</div><h2 style="font-size:1.3rem">反覆練習，練到精熟</h2><div class="say">格格龜：「${GUARD.G.line}」</div></div></div>
    <div class="card" style="background:var(--surface-2);border:0">
      <div class="row" style="justify-content:space-between"><b>已精熟 ${mastered} / ${open.length} 項技能</b></div>
-     <div class="prog" style="max-width:none"><i style="width:${open.length?mastered/open.length*100:0}%"></i></div>
+     <div class="prog" style="max-width:none"><i style="width:${progressOf(open).pct}%"></i></div><div class="muted" style="font-size:.85rem">已練過 ${progressOf(open).practiced} 項技能</div>
      <p class="muted" style="font-size:.85rem;margin:8px 0 0">精熟標準：同一項技能最近 10 題至少答對 9 題，而且是在 2 天以上練習累積的。整輪全對的技能，下次複習會間隔更久（1、2、4、7、14 天）；有答錯就改成隔天再複習，答錯的題目優先出現。</p>
    </div>
    ${due.length?`<div class="feedback ok" style="display:grid;gap:8px"><b>今天要複習 ${due.length} 項技能</b><div class="row">${due.map(u=>`<span class="chip">${esc(u.title)}</span>`).join("")}</div><div><button class="btn primary" data-act="review">開始今日複習</button></div></div>`:`<p class="muted" style="margin:0">今天沒有到期的複習，可以依技能樹往下練習。</p>`}
@@ -1005,7 +1011,7 @@ function renderVocabHall(){
   normP(P); showTab("play"); round=null;
   const due=dueUnits("V");
   $("#game").innerHTML=`<div class="guard-head">${guardSVG("V","happy",64)}<div><div class="eyebrow">單字館</div><h2 style="font-size:1.3rem">主題單字，練到精熟</h2><div class="say">字字狐：「${GUARD.V.line}」</div></div></div>
-   <div class="card" style="background:var(--surface-2);border:0"><b>已精熟 ${masteredCount(P,"V")} / ${unitTotal("V")} 個主題</b>
+   <div class="card" style="background:var(--surface-2);border:0"><b>已精熟 ${masteredCount(P,"V")} / ${unitTotal("V")} 個主題</b><div class="prog" style="max-width:none;margin-top:6px"><i style="width:${progressOf(VOCAB.filter(v=>unlocked(v.stage)).map(v=>({id:v.id}))).pct}%"></i></div><div class="muted" style="font-size:.85rem">已練過 ${progressOf(VOCAB.map(v=>({id:v.id}))).practiced} 個主題</div>
      <p class="muted" style="font-size:.85rem;margin:8px 0 0">每輪從主題中挑 5 個字，隨機出成「看中文選英文」「聽音選意思」「聽寫拼字」三種題型，每次重新組題，不容易背答案。精熟標準與複習間隔和文法館相同。</p></div>
    ${due.length?`<div class="feedback ok" style="display:grid;gap:8px"><b>今天要複習 ${due.length} 個主題</b><div class="row">${due.map(u=>`<span class="chip">${esc(u.title)}</span>`).join("")}</div><div><button class="btn primary" data-act="mixreview">開始今日複習</button></div></div>`:""}
    ${STAGES.map(st=>{ const us=VOCAB.filter(v=>v.stage===st.n); if(!us.length) return "";
@@ -1102,7 +1108,7 @@ function renderMastery(){
   el.innerHTML=`<div class="eyebrow">精熟總覽</div><p class="muted" style="font-size:.85rem;margin:4px 0 10px">每個單元：最近 10 題至少答對 9 題、且在 2 天以上累積，就算精熟。</p>
    <div style="display:grid;gap:10px">${Object.entries(SKILLS).map(([k,v])=>{ const mc=masteredCount(P,k), tot=unitTotal(k);
      const units=k==="G"?[]:allUnits().filter(u=>u.skill===k);
-     return `<div><div class="row" style="justify-content:space-between"><b>${v.name}</b><span class="muted" style="font-size:.85rem">精熟 ${mc} / ${tot}</span></div><div class="prog" style="max-width:none"><i style="width:${tot?mc/tot*100:0}%;background:var(--good)"></i></div>
+     return `<div><div class="row" style="justify-content:space-between"><b>${v.name}</b><span class="muted" style="font-size:.85rem">練過 ${progressOf(allUnits().filter(u=>u.skill===k)).practiced}｜精熟 ${mc} / ${tot}</span></div><div class="prog" style="max-width:none"><i style="width:${progressOf(allUnits().filter(u=>u.skill===k)).pct}%;${mc===tot&&tot?"background:var(--good)":""}"></i></div>
        ${units.length?`<div class="row" style="margin-top:6px">${units.map(u=>{ const m=mastery(P.gram[u.id]); return `<span class="chip ${m.cls}">${esc(u.title.replace(/^.*｜/,""))}：${m.label}</span>`; }).join("")}</div>`:""}</div>`; }).join("")}</div>`;
 }
 function renderAch(){
