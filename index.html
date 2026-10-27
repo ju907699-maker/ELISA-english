@@ -201,6 +201,7 @@ pre{background:var(--surface-2);border-radius:8px;padding:12px;overflow-x:auto;f
 .bob{animation:bob 2.4s ease-in-out infinite}
 @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+#detail .chip,#dayBox .chip{white-space:normal;max-width:100%}
 </style>
 <style>header.top{top:0;padding-top:env(safe-area-inset-top,0px)} main{padding-bottom:calc(24px + env(safe-area-inset-bottom,0px))}</style>
 </head>
@@ -603,7 +604,7 @@ async function saveRemote(){
   if(!db||!uid){ setSync(); return; }
   try{
     const days=Object.keys(P.daily).sort().slice(-30); const daily={}; days.forEach(d=>daily[d]=P.daily[d]);
-    P.daily=daily;
+    P.daily=daily; trimLog(P);
     const wrongTop=Object.entries(P.wrong).sort((a,b)=>b[1]-a[1]).slice(0,30); P.wrong=Object.fromEntries(wrongTop);
     await db.doc("learners/"+uid).set(Object.assign({},P,{stage:highestUnlocked(),updatedAt:Date.now()}));
     setSync("已同步到雲端");
@@ -849,6 +850,7 @@ function answer(ok, note){
   else { round.combo=0; if(!q.ai) P.wrong[q.id]=(P.wrong[q.id]||0)+1; }
   round.gained+=gain; P.xp+=gain; P.stageXP[round.stage]=(P.stageXP[round.stage]||0)+gain;
   const d=today(); P.daily[d]=(P.daily[d]||0)+1;
+  logAnswer(q, ok, d);
   if(P.lastDay!==d){ P.streak = P.lastDay===yesterday()? P.streak+1 : 1; P.lastDay=d; }
   P.lastActive=Date.now();
   if(q.unit){ const gu=gUnit(q.unit), before=mastery(gu).lv; gu.a++; if(ok) gu.c++; gu.hist=(gu.hist||[]).concat({o:ok?1:0,d:today()}).slice(-10);
@@ -860,6 +862,24 @@ function answer(ok, note){
   document.querySelectorAll("[data-self],[data-act=rec],[data-act=check],[data-act=undo]").forEach(x=>x.disabled=true);
   document.querySelector(".dots").outerHTML=dots();
   checkAch(); renderHeader(); saveLocal();
+}
+// 每日學習紀錄：P.log[日期] = {sec 學習秒數, n 題數, ok 答對, u:{單元ID:[題數,答對]}}
+// 學習時間以作答間隔累計，每題最多算 3 分鐘，避免離開畫面時一直計時
+const LOG_CAP_SEC=180, LOG_KEEP_DAYS=60;
+function logAnswer(q, ok, d){
+  if(!P.log) P.log={};
+  const day=P.log[d]||(P.log[d]={sec:0,n:0,ok:0,u:{}});
+  const now=Date.now(), since=round.lastAt||round.start||now;
+  day.sec=Math.round(day.sec+Math.min(Math.max(0,(now-since)/1000),LOG_CAP_SEC)); round.lastAt=now;
+  day.n++; if(ok) day.ok++;
+  const key=q.unit||(q.skill+"-"+q.stage), e=day.u[key]||(day.u[key]=[0,0]); e[0]++; if(ok) e[1]++;
+}
+function trimLog(p){ if(!p.log) return; const keep=Object.keys(p.log).sort().slice(-LOG_KEEP_DAYS); const o={}; keep.forEach(k=>o[k]=p.log[k]); p.log=o; }
+function fmtDur(sec){ sec=Math.round(sec||0); if(!sec) return "0 分"; const h=Math.floor(sec/3600), m=Math.floor(sec%3600/60), s2=sec%60; return h? `${h} 小時 ${m} 分` : m? `${m} 分 ${s2} 秒` : `${s2} 秒`; }
+function unitLabel(key){ const u=unitById(key); if(u) return {skill:u.skill, title:u.skill==="V"||u.skill==="G"? u.title.replace(/^單字｜/,"") : STAGES[u.stage-1].name}; const k=String(key).split("-")[0]; return {skill:SKILLS[k]?k:"", title:key}; }
+function dayContentHTML(day){
+  const by={}; Object.entries(day.u||{}).forEach(([key,[n,ok]])=>{ const lb=unitLabel(key); (by[lb.skill]=by[lb.skill]||[]).push(`${esc(lb.title)} ${ok}/${n}`); });
+  return Object.keys(SKILLS).filter(k=>by[k]).map(k=>`<div><b>${SKILLS[k].name}</b>：<span class="muted">${by[k].join("、")}</span></div>`).join("") || `<span class="muted">—</span>`;
 }
 function nextQ(){ round.i++; if(round.i<round.qs.length) renderQ(); else finishRound(); }
 function finishRound(){
@@ -1154,7 +1174,8 @@ Return JSON only: {"score": integer 1-5 (5 = fully meets the target level), "str
 /* ============ 後台 ============ */
 let learners=[]; let learnersSub=false; let profiles={};
 const DEMO = (()=>{ const now=Date.now(), D=864e5; const mk=(name,stage,xp,acc,days,streak,wrong)=>{ const s={}; ["L","S","R","W","G","V"].forEach((k,i)=>{ const a=20+i*7; s[k]={a, c:Math.round(a*(acc[i]??0.75)), r:Math.ceil(a/5)}; }); const gram={}; GRAMMAR.filter(u=>u.stage<=stage).forEach((u,i)=>{ const m = i < stage*2 ? 10 : 6; const ok = i < stage*2 ? 9 : 3; gram[u.id]={a:m,c:ok,box:i<stage*2?3:0,due:"",hist:Array.from({length:m},(_,k)=>({o:k<ok?1:0,d:k<5?"2026-10-10":"2026-10-12"}))}; });
-    return {_demo:true,name:name,stage,xp,streak,lastActive:now-days*D,skills:s,wrong:wrong,rounds:18,minutes:stage*40,gram}; };
+    const log={}; for(let k=0;k<4;k++){ const dd=new Date(now-(days+k*2)*D); const key=dd.getFullYear()+"-"+String(dd.getMonth()+1).padStart(2,"0")+"-"+String(dd.getDate()).padStart(2,"0"); log[key]={sec:600+stage*180+k*90,n:10+k*5,ok:8+k*3,u:{"V1-1":[5,4],"G001":[5,4],["L-"+Math.min(stage,5)]:[k*5,k*3]}}; if(!k) delete log[key].u["L-"+Math.min(stage,5)]; }
+    return {_demo:true,name:name,stage,xp,streak,lastActive:now-days*D,skills:s,wrong:wrong,rounds:18,minutes:stage*40,gram,log}; };
   return [mk("小安（模擬）",2,520,[.86,.8,.74,.62,.66],0,6,{"W2-01":3,"L2-03":2,"G2-5-1":2}), mk("阿哲（模擬）",3,910,[.9,.72,.83,.7,.81],1,12,{"W3-02":2,"G3-2-3":1}), mk("Mia（模擬）",1,140,[.55,.6,.48,.4,.45],9,0,{"R1-03":3,"W1-03":2,"L1-03":2}), mk("Leo（模擬）",4,1430,[.81,.66,.88,.58,.62],2,3,{"W4-01":4,"S4-01":2})]; })();
 const DAY=864e5;
 function acc(s){ return s&&s.a? s.c/s.a : null; }
@@ -1213,24 +1234,42 @@ async function renderAdmin(){
        <td>${masteredCount(l)}/${unitTotal()}</td><td>${ago(l.lastActive)}</td><td>${l.streak||0}</td><td><span class="chip ${c}">${t}</span></td></tr>`; }).join("")}
    </table></div>
    <div id="detail"></div>
+   <div class="card" id="dayBox"></div>
    <div class="card"><div class="eyebrow">全體常錯題（累計答錯次數）</div>
      ${topWrong.length?`<div class="tablebox" style="margin-top:8px"><table><tr><th>題號</th><th>技能</th><th>題目</th><th>次數</th></tr>${topWrong.map(([id,c])=>{ const q=bank().find(x=>x.id===id); return `<tr><td>${esc(id)}</td><td>${q?SKILLS[q.skill].name:"—"}</td><td style="white-space:normal">${q?esc(q.prompt+(q.audio?"｜"+q.audio:"")):"（題目已移除）"}</td><td>${c}</td></tr>`; }).join("")}</table></div>`:`<p class="muted">目前沒有答錯紀錄。</p>`}
    </div>
    ${gramAudit()}
    ${bankPanel()}`;
   body.querySelectorAll("tr[data-row]").forEach(tr=>tr.addEventListener("click",()=>showDetail(list[+tr.dataset.row])));
+  renderDayBox(list);
   wireBankForm();
+}
+let adminDay=null;
+function renderDayBox(list){
+  const box=$("#dayBox"); if(!box) return;
+  if(!adminDay) adminDay=today();
+  const rows=list.map(l=>({l, day:(l.log||{})[adminDay], old:(l.daily||{})[adminDay]})).filter(x=>x.day||x.old);
+  const tot=rows.reduce((a,x)=>a+(x.day?x.day.sec:0),0);
+  box.innerHTML=`<div class="row" style="justify-content:space-between"><div><div class="eyebrow">每日學習紀錄</div><b>${adminDay}｜${rows.length} / ${list.length} 人有學習</b>${rows.length?`<span class="muted" style="font-size:.85rem">　合計 ${fmtDur(tot)}</span>`:""}</div>
+     <label class="row" style="font-size:.9rem">日期 <input type="date" id="dayPick" value="${adminDay}" max="${today()}" style="width:auto"></label></div>
+   ${rows.length?`<div class="tablebox" style="margin-top:10px"><table><tr><th>學習者</th><th>學習時間</th><th>題數（答對）</th><th>學習內容（單元 答對/題數）</th></tr>
+     ${rows.sort((a,b)=>((b.day&&b.day.sec)||0)-((a.day&&a.day.sec)||0)).map(x=>`<tr><td><b>${esc(displayName(x.l))}</b></td><td>${x.day?fmtDur(x.day.sec):"—"}</td><td>${x.day?`${x.day.n}（${x.day.ok}）`:`${x.old}（舊版紀錄）`}</td><td style="white-space:normal;min-width:220px">${x.day?dayContentHTML(x.day):`<span class="muted">這天是更新前的紀錄，只有題數</span>`}</td></tr>`).join("")}</table></div>`
+     :`<p class="muted" style="margin:10px 0 0">這一天沒有學習紀錄。</p>`}
+   <p class="muted" style="font-size:.82rem;margin:8px 0 0">學習時間以作答計算：從開始一輪到每次作答的間隔累加，每題最多算 3 分鐘，離開畫面不會一直計時。更新前的日子只有作答題數。</p>`;
+  $("#dayPick").addEventListener("change",e=>{ adminDay=e.target.value||today(); renderDayBox(list); });
 }
 function displayName(l){ return l.name||l.nickname||"（未填姓名）"; }
 function accountName(l){ const p=l._id&&profiles[l._id]; return p&&p.name&&p.name!==displayName(l)? p.name : ""; }
 async function resolveNames(){ if(!user) return; try{ const ids=learners.map(l=>l._id); if(ids.length) profiles=await user.profiles(ids)||{}; }catch(e){} }
 function showDetail(l){
   const w=Object.entries(l.wrong||{}).sort((a,b)=>b[1]-a[1]).slice(0,8);
-  const days=Object.entries(l.daily||{}).sort().slice(-14);
+  const logDays=Object.keys(Object.assign({},l.daily||{},l.log||{})).sort().reverse().slice(0,30);
+  const tSec=Object.values(l.log||{}).reduce((a,d)=>a+(d.sec||0),0);
   $("#detail").innerHTML=`<div class="card"><div class="eyebrow">個人學習紀錄</div><h3 style="margin-top:4px">學習紀錄：${esc(displayName(l))}</h3>
     <p class="muted">累計 ${l.rounds||0} 輪、約 ${l.minutes||0} 分鐘；取得徽章 ${Object.keys(l.ach||{}).length} 枚。</p>
     <div class="skills4">${Object.keys(SKILLS).map(k=>{ const s=(l.skills||{})[k]||{a:0,c:0,r:0}; return `<div class="kpi"><b>${s.a?Math.round(s.c/s.a*100)+"%":"—"}</b><small>${SKILLS[k].name}：${s.c}/${s.a} 題、${s.r} 輪</small></div>`; }).join("")}</div>
-    ${days.length?`<p class="eyebrow" style="margin-top:12px">近 14 個學習日作答題數</p><div class="row">${days.map(([d,c])=>`<span class="chip">${d.slice(5)}：${c}</span>`).join("")}</div>`:""}
+    <p class="eyebrow" style="margin-top:12px">每日學習內容與時間（近 30 個學習日${tSec?`，合計 ${fmtDur(tSec)}`:""}）</p>
+    ${logDays.length?`<div class="tablebox"><table><tr><th>日期</th><th>學習時間</th><th>題數（答對）</th><th>學習內容（單元 答對/題數）</th></tr>${logDays.map(d=>{ const day=(l.log||{})[d]; return `<tr><td>${d}</td><td>${day?fmtDur(day.sec):"—"}</td><td>${day?`${day.n}（${day.ok}）`:`${(l.daily||{})[d]||0}（舊版紀錄）`}</td><td style="white-space:normal;min-width:220px">${day?dayContentHTML(day):`<span class="muted">更新前的紀錄，只有題數</span>`}</td></tr>`; }).join("")}</table></div>`:`<p class="muted">還沒有學習紀錄。</p>`}
     <p class="eyebrow" style="margin-top:12px">精熟度（共精熟 ${masteredCount(l)} / ${unitTotal()} 個單元）</p>
     ${Object.entries(SKILLS).map(([k,v])=>{ const us=allUnits().filter(u=>u.skill===k&&l.gram&&l.gram[u.id]&&l.gram[u.id].a); return `<div style="margin-top:6px"><b>${v.name}</b> <span class="muted" style="font-size:.85rem">精熟 ${masteredCount(l,k)} / ${unitTotal(k)}</span><div class="row" style="margin-top:4px">${us.length?us.map(u=>{ const g=l.gram[u.id], m=mastery(g); return `<span class="chip ${m.cls}">${esc(u.title)}：${m.label}（近 ${m.n} 題對 ${m.ok}${g.due?"，複習 "+g.due.slice(5):""}）</span>`; }).join(""):`<span class="muted" style="font-size:.85rem">尚未練習</span>`}</div></div>`; }).join("")}
     <p class="eyebrow" style="margin-top:12px">待加強題目</p>
