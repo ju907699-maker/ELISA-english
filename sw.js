@@ -1,5 +1,5 @@
 /* 英文傳說 service worker：離線可用。更新版本時請把 VERSION 改成新的值。 */
-const VERSION = "el-v10-1";
+const VERSION = "el-v11-1";
 const SHELL = ["./", "index.html", "config.js", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png", "icons/icon-maskable-512.png", "icons/apple-touch-icon.png"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(VERSION).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
